@@ -1,12 +1,19 @@
 import "dotenv/config";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
+// `prisma generate` doesn't need a live database connection, so this falls
+// back to a placeholder instead of throwing when DATABASE_URL isn't set yet
+// (e.g. a fresh Vercel project before env vars are configured). Commands
+// that do need a real connection (migrate, db push) will fail with a clear
+// connection error instead, which is the right failure mode for those.
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    url:
+      process.env.DATABASE_URL ??
+      "postgresql://placeholder:placeholder@localhost:5432/placeholder",
   },
 });
