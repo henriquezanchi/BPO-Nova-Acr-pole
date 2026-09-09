@@ -1,8 +1,17 @@
-// Schema inicial do MVP - Portal do Membro & BPO Financeiro
+// Schema do MVP - Portal do Membro & BPO Financeiro
 // Referência: protótipos demo-whatsapp.html, portal (visão do diretor).html, portal (visão do membro).html
+//
+// Banco COMPARTILHADO com o CRMNovaAcropole (mesmo projeto Supabase). O
+// modelo `Filial` abaixo é mapeado pra tabela `filiais` que já existe e já
+// tem dados reais — não recriar/duplicar esse conceito como "School". As
+// tabelas do CRM (leads_inscricoes, turmas, eventos, etc.) não entram
+// aqui: este schema só declara o que o BPO precisa "escrever" nele
+// próprio; cruzamentos com dados do CRM (ex: leads_inscricoes.matricula_mercurio)
+// são feitos por valor (mesma convenção do CRM/scraper), não por FK formal.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -30,35 +39,47 @@ enum ChargeTriggerType {
   atraso_60
 }
 
-model School {
-  id        String   @id @default(cuid())
-  name      String
-  city      String?
-  createdAt DateTime @default(now())
+/// Tabela já existente no Supabase compartilhado (CRMNovaAcropole) — só
+/// declarando aqui pra poder relacionar (`@@map`), nunca migrar/alterar a
+/// estrutura dela a partir do BPO.
+model Filial {
+  id                     BigInt   @id @default(autoincrement())
+  nome                   String   @unique
+  ativo                  Boolean  @default(true)
+  ordem                  Int      @default(0)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  whatsappPhoneNumberId  String?  @map("whatsapp_phone_number_id")
+  nomeComPreposicao      String?  @map("nome_com_preposicao")
+  whatsappChefeNumero    String?  @map("whatsapp_chefe_numero")
+  valorMensalidade       Decimal? @map("valor_mensalidade") @db.Decimal(10, 2)
 
   members       Member[]
   events        Event[]
   payables      Payable[]
   chargingRules ChargingRule[]
+
+  @@map("filiais")
 }
 
 model Member {
-  id             String       @id @default(cuid())
-  schoolId       String
-  school         School       @relation(fields: [schoolId], references: [id])
-  registrationNo String? // "Matrícula #21596"
-  name           String
-  whatsapp       String
-  email          String?
-  status         MemberStatus @default(em_dia)
-  createdAt      DateTime     @default(now())
+  id                 String       @id @default(cuid())
+  filialId           BigInt
+  filial             Filial       @relation(fields: [filialId], references: [id])
+  registrationNo     String? // "Matrícula #21596"
+  matriculaMercurio  Int? // cruza com leads_inscricoes.matricula_mercurio (por valor, sem FK)
+  name               String
+  whatsapp           String
+  email              String?
+  status             MemberStatus @default(em_dia)
+  createdAt          DateTime     @default(now())
 
   contributions   Contribution[]
   fortunaTx       FortunaTransaction[]
   crmContacts     CrmContact[]
   eventRegistr    EventRegistration[]
 
-  @@index([schoolId])
+  @@index([filialId])
+  @@index([matriculaMercurio])
 }
 
 model Contribution {
@@ -101,37 +122,37 @@ model CrmContact {
 
 model ChargingRule {
   id       String  @id @default(cuid())
-  schoolId String
-  school   School  @relation(fields: [schoolId], references: [id])
+  filialId BigInt
+  filial   Filial  @relation(fields: [filialId], references: [id])
   name     String // "Régua Padrão", "Régua Suave", "Régua de Resgate"
   triggers ChargeTrigger[]
 
-  @@index([schoolId])
+  @@index([filialId])
 }
 
 model ChargeTrigger {
-  id             String            @id @default(cuid())
-  chargingRuleId String
-  chargingRule   ChargingRule      @relation(fields: [chargingRuleId], references: [id])
-  type           ChargeTriggerType
-  active         Boolean           @default(true)
-  messageTemplate String           @db.Text
+  id              String            @id @default(cuid())
+  chargingRuleId  String
+  chargingRule    ChargingRule      @relation(fields: [chargingRuleId], references: [id])
+  type            ChargeTriggerType
+  active          Boolean           @default(true)
+  messageTemplate String            @db.Text
 
   @@index([chargingRuleId])
 }
 
 model Event {
-  id          String   @id @default(cuid())
-  schoolId    String
-  school      School   @relation(fields: [schoolId], references: [id])
-  title       String
-  startsAt    DateTime
-  price       Decimal  @db.Decimal(10, 2)
-  createdAt   DateTime @default(now())
+  id       String   @id @default(cuid())
+  filialId BigInt
+  filial   Filial   @relation(fields: [filialId], references: [id])
+  title    String
+  startsAt DateTime
+  price    Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
 
   registrations EventRegistration[]
 
-  @@index([schoolId])
+  @@index([filialId])
 }
 
 model EventRegistration {
@@ -150,8 +171,8 @@ model EventRegistration {
 
 model Payable {
   id         String    @id @default(cuid())
-  schoolId   String
-  school     School    @relation(fields: [schoolId], references: [id])
+  filialId   BigInt
+  filial     Filial    @relation(fields: [filialId], references: [id])
   vendor     String
   amount     Decimal   @db.Decimal(10, 2)
   dueDate    DateTime
@@ -159,5 +180,225 @@ model Payable {
   paidAt     DateTime?
   createdAt  DateTime  @default(now())
 
-  @@index([schoolId])
+  @@index([filialId])
+}
+
+// ============================================================
+// A PARTIR DE AQUI: tabelas do CRMNovaAcropole que já existem no mesmo
+// banco (Supabase compartilhado). Declaradas aqui só pra evitar que
+// `prisma db push`/`migrate` tentem apagá-las (o Prisma trata o schema
+// como a verdade absoluta do banco inteiro). NUNCA editar a estrutura
+// destas a partir do BPO — qualquer migração nelas é responsabilidade do
+// projeto CRMNovaAcropole. Geradas por introspecção (`prisma db pull`).
+// ============================================================
+
+model config_pontuacao_lead_forte {
+  id                         Int      @id @default(1)
+  pontos_por_evento          Int      @default(10)
+  pontos_por_tipo_distinto   Int      @default(5)
+  pontos_evento_recente_dias Int      @default(90)
+  bonus_evento_recente       Int      @default(15)
+  limite_nivel_1             Int      @default(30)
+  limite_nivel_2             Int      @default(15)
+  atualizado_em              DateTime @default(now()) @db.Timestamptz(6)
+  dias_gate_nivel_1          Int      @default(30)
+}
+
+model credenciais_scraper {
+  id            BigInt   @id @default(autoincrement())
+  sistema       String
+  filial        String   @default("GLOBAL")
+  usuario       String?
+  senha_cifrada Bytes
+  atualizado_em DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([sistema, filial])
+}
+
+model evento_leads {
+  id                  BigInt   @id @default(autoincrement())
+  evento_id           BigInt
+  pessoaIdentificador String
+  resposta_convite    String   @default("pendente")
+  compareceu          Boolean?
+  nota                String?
+  criado_em           DateTime @default(now()) @db.Timestamptz(6)
+  atualizado_em       DateTime @default(now()) @db.Timestamptz(6)
+  matriculado         Boolean?
+  eventos             eventos  @relation(fields: [evento_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([evento_id, pessoaIdentificador])
+  @@index([evento_id], map: "idx_evento_leads_evento")
+  @@index([pessoaIdentificador], map: "idx_evento_leads_pessoa")
+}
+
+model eventos {
+  id                       BigInt         @id @default(autoincrement())
+  filial                   String
+  nome                     String
+  tipo                     String?
+  data                     DateTime       @db.Date
+  hora                     DateTime?      @db.Time(6)
+  ingresso                 String?
+  capacidade               Int?
+  ativo                    Boolean        @default(true)
+  criado_em                DateTime       @default(now()) @db.Timestamptz(6)
+  data_limite_inscricao    DateTime?      @db.Date
+  imagem_url               String?
+  descricao                String?
+  grupo_evento_id          String?
+  participantes_unificados Boolean        @default(false)
+  evento_leads             evento_leads[]
+
+  @@index([grupo_evento_id], map: "idx_eventos_grupo", where: raw("(grupo_evento_id IS NOT NULL)"))
+}
+
+model leads_a_tratar {
+  id              BigInt   @id(map: "duplicados_leads_pkey") @default(autoincrement())
+  filial          String
+  grupo           String
+  criterio        String
+  pessoa_id       String
+  pessoa_nome     String?
+  pessoa_telefone String?
+  detectado_em    DateTime @default(now()) @db.Timestamptz(6)
+  pessoa_email    String?
+  pontuacao       Decimal? @db.Decimal
+
+  @@index([filial], map: "idx_duplicados_leads_filial")
+  @@index([filial], map: "idx_leads_a_tratar_filial")
+}
+
+model leads_a_tratar_ignorados {
+  id          BigInt   @id @default(autoincrement())
+  filial      String
+  grupo       String
+  criterio    String?
+  descricao   String?
+  ignorado_em DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([filial, grupo])
+}
+
+model leads_inscricoes {
+  pessoaStatus                String?
+  pessoaIdentificador         String    @id(map: "leads_pkey") @unique(map: "leads_pessoaIdentificador_key")
+  pessoaNome                  String?
+  pessoaTelefoneDDD           String?
+  pessoaTelefoneNumero        String?
+  pessoaEmail                 String?
+  eventoIdentificador         String?
+  eventoNome                  String?
+  eventoData                  String?
+  telemarketingStatus         String?
+  funil_agencia               String?   @default("Frios")
+  tags                        Json?     @default("[]")
+  resumo_ia                   String?
+  filial                      String?   @default("Goiânia - Jardim América")
+  historico_eventos           Json?     @default("[]")
+  motivo_saida                String?
+  lembrete_em                 DateTime? @db.Date
+  lembrete_nota               String?
+  data_saida                  String?
+  abordagem_sugerida          String?
+  matricula_mercurio          Int?
+  data_matricula              DateTime? @db.Date
+  funil_agencia_atualizado_em DateTime? @default(now()) @db.Timestamptz(6)
+  motivo_perda                String?
+  data_perda                  DateTime? @db.Date
+  grupo_familiar_id           String?   @db.Uuid
+  data_nascimento             DateTime? @db.Date
+
+  @@unique([filial, matricula_mercurio], map: "uq_leads_matricula_mercurio", where: raw("(matricula_mercurio IS NOT NULL)"))
+  @@index([filial], map: "idx_leads_filial")
+  @@index([historico_eventos], map: "idx_leads_historico_eventos", type: Gin)
+  @@index([grupo_familiar_id], map: "idx_leads_inscricoes_grupo_familiar_id", where: raw("(grupo_familiar_id IS NOT NULL)"))
+  @@index([pessoaIdentificador], map: "idx_leads_pessoa_identificador")
+  @@index([pessoaTelefoneDDD], map: "idx_leads_telefone_ddd")
+}
+
+model log_atividade {
+  id         BigInt   @id @default(autoincrement())
+  criado_em  DateTime @default(now()) @db.Timestamptz(6)
+  filial     String?
+  acao       String
+  autor      String?
+  pessoa_ids Json?
+  detalhes   Json?
+
+  @@index([acao], map: "idx_log_atividade_acao")
+  @@index([criado_em(sort: Desc)], map: "idx_log_atividade_criado_em")
+  @@index([filial], map: "idx_log_atividade_filial")
+}
+
+model mensagens_whatsapp {
+  id                   BigInt   @id @default(autoincrement())
+  pessoaIdentificador  String?
+  telefone_whatsapp    String
+  filial               String?
+  direcao              String
+  tipo                 String   @default("texto")
+  corpo_texto          String?
+  wa_message_id        String?  @unique(map: "uq_mensagens_wa_message_id")
+  wa_status            String   @default("enviando")
+  wa_status_erro       Json?
+  phone_number_id_meta String?
+  payload_bruto        Json?
+  criado_em            DateTime @default(now()) @db.Timestamptz(6)
+  atualizado_em        DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([pessoaIdentificador, criado_em], map: "idx_mensagens_pessoa_criado")
+  @@index([telefone_whatsapp], map: "idx_mensagens_telefone")
+}
+
+model status_sincronizacao_automatica {
+  id           BigInt   @id @default(autoincrement())
+  sistema      String
+  filial       String   @default("GLOBAL")
+  sucesso      Boolean
+  mensagem     String?
+  executado_em DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([sistema, filial, executado_em(sort: Desc)], map: "idx_status_sync_sistema_filial_executado")
+}
+
+model tags_sugeridas {
+  id        BigInt   @id @default(autoincrement())
+  tag       String   @unique
+  ordem     Int      @default(0)
+  criado_em DateTime @default(now()) @db.Timestamptz(6)
+  familia   String?
+}
+
+model temas_eventos {
+  evento_nome_normalizado String   @id
+  evento_nome_original    String
+  tema                    String
+  criado_em               DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model tipos_evento {
+  id             BigInt  @id @default(autoincrement())
+  nome           String  @unique
+  ordem          Int     @default(0)
+  trilha         String?
+  palavras_chave String?
+}
+
+model trilhas_tipo_evento {
+  tipo_evento String  @id
+  trilha      String?
+}
+
+model turmas {
+  id            BigInt   @id @default(autoincrement())
+  filial        String
+  nome          String
+  dia           String?
+  horario       String?
+  ativo         Boolean  @default(true)
+  atualizado_em DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([filial, nome])
+  @@index([filial], map: "idx_turmas_filial")
 }

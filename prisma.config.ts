@@ -12,7 +12,12 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
+    // CLI commands (migrate, db pull, generate) usam a conexão direta —
+    // a "Transaction pooler" (DATABASE_URL, usada em runtime pelo app)
+    // trava nesses comandos (limitação conhecida do PgBouncer em modo
+    // transação).
     url:
+      process.env.DIRECT_DATABASE_URL ??
       process.env.DATABASE_URL ??
       "postgresql://placeholder:placeholder@localhost:5432/placeholder",
   },
