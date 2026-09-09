@@ -125,7 +125,7 @@ export default function DirectorPortal() {
               className={`${styles.navItem} ${activeTab === item.id ? styles.navItemActive : ""}`}
               onClick={() => setActiveTab(item.id)}
             >
-              <i className={`fa-solid ${item.icon}`} /> {item.label}
+              <i className={`fa-solid ${item.icon}`} /> <span>{item.label}</span>
             </a>
           ))}
         </nav>
@@ -138,7 +138,7 @@ export default function DirectorPortal() {
             <p className={styles.pageTitleP}>Governança Financeira - Agosto / 2026</p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-right">
+            <div className={`text-right ${styles.userProfileName}`}>
               <div className="text-sm font-semibold" style={{ color: "var(--text-dark)" }}>
                 Bia (Diretoria)
               </div>
